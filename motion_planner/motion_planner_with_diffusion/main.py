@@ -6,7 +6,6 @@ from torch.utils.data import DataLoader, WeightedRandomSampler, random_split
 from data import SCENARIO_NAMES, create_multimodal_dataset
 from metrics import (
     collision_rate,
-    comfort_metrics,
     minimum_average_displacement_error,
     minimum_final_displacement_error,
     route_deviation,
@@ -38,7 +37,7 @@ device = torch.device(
 print("Device:", device)
 
 dataset = create_multimodal_dataset(
-    num_samples=4_000,
+    num_samples=6_000,
     num_agents=num_agents,
     history_steps=history_steps,
     future_steps=future_steps,
@@ -53,9 +52,9 @@ for scenario_index, scenario_name in enumerate(SCENARIO_NAMES):
     print(f"{scenario_name}: {count}")
 
 split_generator = torch.Generator().manual_seed(42)
-train_dataset, validation_dataset = random_split(
+train_dataset, validation_dataset, test_dataset = random_split(
     dataset,
-    [3_200, 800],
+    [3_200, 800, 2_000],
     generator=split_generator,
 )
 
@@ -77,6 +76,10 @@ train_loader = DataLoader(
 validation_loader = DataLoader(
     validation_dataset,
     batch_size=64,
+)
+test_loader = DataLoader(
+    test_dataset,
+    batch_size=64
 )
 
 model = TrajectoryDiffusion(
@@ -172,15 +175,13 @@ total_min_ade = 0.0
 total_min_fde = 0.0
 total_collision_rate = 0.0
 total_route_deviation = 0.0
-total_acceleration = 0.0
-total_jerk = 0.0
 total_endpoint_spread = 0.0
 scenario_ade = torch.zeros(len(SCENARIO_NAMES))
 scenario_fde = torch.zeros(len(SCENARIO_NAMES))
 scenario_counts = torch.zeros(len(SCENARIO_NAMES))
 
 with torch.no_grad():
-    for histories, futures, routes, scenarios, _ in validation_loader:
+    for histories, futures, routes, scenarios, _ in test_loader:
         histories = histories.to(device)
         futures = futures.to(device) * coordinate_scale
         routes = routes.to(device)
@@ -193,7 +194,6 @@ with torch.no_grad():
         routes_meters = routes * coordinate_scale
         ego_targets = futures[:, 0]
         selected = select_best_trajectory(samples, ego_targets)
-        acceleration, jerk = comfort_metrics(selected, dt)
 
         batch_size = histories.shape[0]
         total_min_ade += (
@@ -212,8 +212,6 @@ with torch.no_grad():
             route_deviation(selected, routes_meters).item()
             * batch_size
         )
-        total_acceleration += acceleration.item() * batch_size
-        total_jerk += jerk.item() * batch_size
 
         endpoints = samples[:, :, -1]
         endpoint_center = endpoints.mean(dim=1, keepdim=True)
@@ -242,16 +240,14 @@ with torch.no_grad():
                 )
                 scenario_counts[scenario_index] += count
 
-validation_size = len(validation_dataset)
+test_size = len(test_dataset)
 print("-" * 60)
 print(f"Diffusion samples per scene: {num_samples}")
-print(f"minADE={total_min_ade / validation_size:.4f}")
-print(f"minFDE={total_min_fde / validation_size:.4f}")
-print(f"collision_rate={total_collision_rate / validation_size:.4f}")
-print(f"route_deviation={total_route_deviation / validation_size:.4f}")
-print(f"acceleration={total_acceleration / validation_size:.4f}")
-print(f"jerk={total_jerk / validation_size:.4f}")
-print(f"endpoint_spread={total_endpoint_spread / validation_size:.4f}")
+print(f"minADE={total_min_ade / test_size:.4f}")
+print(f"minFDE={total_min_fde / test_size:.4f}")
+print(f"collision_rate={total_collision_rate / test_size:.4f}")
+print(f"route_deviation={total_route_deviation / test_size:.4f}")
+print(f"endpoint_spread={total_endpoint_spread / test_size:.4f}")
 
 print("-" * 60)
 print("Metrics by scenario")

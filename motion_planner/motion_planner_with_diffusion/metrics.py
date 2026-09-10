@@ -56,28 +56,3 @@ def route_deviation(
     distances_to_route = torch.cdist(predictions, routes)
     return distances_to_route.min(dim=-1).values.mean()
 
-
-def comfort_metrics(
-    predictions: torch.Tensor,
-    dt: float,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    velocities = (
-        predictions[:, 1:] - predictions[:, :-1]
-    ) / dt
-    accelerations = (
-        velocities[:, 1:] - velocities[:, :-1]
-    ) / dt
-    jerks = (
-        accelerations[:, 1:] - accelerations[:, :-1]
-    ) / dt
-
-    mean_acceleration = torch.linalg.vector_norm(
-        accelerations,
-        dim=-1,
-    ).mean()
-    mean_jerk = torch.linalg.vector_norm(
-        jerks,
-        dim=-1,
-    ).mean()
-
-    return mean_acceleration, mean_jerk
