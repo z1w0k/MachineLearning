@@ -5,7 +5,6 @@ from data import SCENARIO_NAMES, create_dataset
 from metrics import (
     average_displacement_error,
     collision_rate,
-    comfort_metrics,
     final_displacement_error,
     route_deviation,
 )
@@ -28,7 +27,7 @@ device = torch.device(
 print("Device:", device)
 
 dataset = create_dataset(
-    num_samples=2_000,
+    num_samples=3_000,
     num_agents=4,
     history_steps=history_steps,
     future_steps=future_steps,
@@ -42,12 +41,13 @@ for scenario_index, scenario_name in enumerate(SCENARIO_NAMES):
     print(f"{scenario_name}: {count}")
 
 split_generator = torch.Generator().manual_seed(42)
-train_dataset, validation_dataset = random_split(
+train_dataset, validation_dataset, test_dataset = random_split(
     dataset,
-    [1_600, 400],
+    [1_600, 400, 1_000],
     generator=split_generator,
 )
 validation_loader = DataLoader(validation_dataset, batch_size=64)
+test_loader = DataLoader(test_dataset, batch_size=64)
 
 
 def create_train_loader(hard_mining: bool) -> DataLoader:
@@ -81,22 +81,19 @@ def evaluate_model(model: TrajectoryTransformer) -> dict:
         "fde": 0.0,
         "collision_rate": 0.0,
         "route_deviation": 0.0,
-        "acceleration": 0.0,
-        "jerk": 0.0,
     }
     scenario_ade = torch.zeros(len(SCENARIO_NAMES))
     scenario_fde = torch.zeros(len(SCENARIO_NAMES))
     scenario_counts = torch.zeros(len(SCENARIO_NAMES))
 
     with torch.no_grad():
-        for histories, futures, routes, scenarios, _ in validation_loader:
+        for histories, futures, routes, scenarios, _ in test_loader:
             histories = histories.to(device)
             futures = futures.to(device)
             routes = routes.to(device)
             ego_targets = futures[:, 0]
             predictions = model(histories, routes)
 
-            acceleration, jerk = comfort_metrics(predictions, dt)
             batch_size = histories.shape[0]
 
             totals["ade"] += (
@@ -115,8 +112,6 @@ def evaluate_model(model: TrajectoryTransformer) -> dict:
                 route_deviation(predictions, routes).item()
                 * batch_size
             )
-            totals["acceleration"] += acceleration.item() * batch_size
-            totals["jerk"] += jerk.item() * batch_size
 
             distances = torch.linalg.vector_norm(
                 predictions - ego_targets,
@@ -135,7 +130,7 @@ def evaluate_model(model: TrajectoryTransformer) -> dict:
                     scenario_counts[scenario_index] += count
 
     for metric_name in totals:
-        totals[metric_name] /= len(validation_dataset)
+        totals[metric_name] /= len(test_dataset)
 
     totals["scenario_ade"] = scenario_ade / scenario_counts
     totals["scenario_fde"] = scenario_fde / scenario_counts
@@ -161,7 +156,7 @@ def train_experiment(
 
     for epoch in range(num_epochs):
         model.train()
-        total_loss = 0.0
+        train_loss = 0.0
 
         for histories, futures, routes, _, _ in train_loader:
             histories = histories.to(device)
@@ -176,12 +171,26 @@ def train_experiment(
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
             optimizer.step()
 
-            total_loss += loss.item() * histories.shape[0]
+            train_loss += loss.item() * histories.shape[0]
+
+        model.eval()
+        validation_loss = 0.0
+
+        with torch.no_grad():
+            for histories, futures, routes, _, _ in validation_loader:
+                histories = histories.to(device)
+                futures = futures.to(device)
+                routes = routes.to(device)
+
+                predictions = model(histories, routes)
+                loss = criterion(predictions, futures[:, 0])
+
+                validation_loss += loss.item() * histories.shape[0]
 
         if (epoch + 1) % 5 == 0:
             print(
                 f"Epoch {epoch + 1}: "
-                f"train_loss={total_loss / len(train_dataset):.4f}"
+                f"train_loss={train_loss / len(train_dataset):.4f}, validation_loss={validation_loss / len(validation_dataset)}"
             )
 
     results = evaluate_model(model)
@@ -208,9 +217,7 @@ for name, results in (
         f"ADE={results['ade']:.4f}, "
         f"FDE={results['fde']:.4f}, "
         f"collision_rate={results['collision_rate']:.4f}, "
-        f"route_deviation={results['route_deviation']:.4f}, "
-        f"acceleration={results['acceleration']:.4f}, "
-        f"jerk={results['jerk']:.4f}"
+        f"route_deviation={results['route_deviation']:.4f}"
     )
 
 print("-" * 60)

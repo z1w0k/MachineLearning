@@ -25,7 +25,7 @@ ego-автомобилем. Модель видит историю всей сц
 - temporal `TransformerEncoder` для истории каждого агента;
 - multi-head attention между агентами;
 - отдельный Transformer encoder для маршрута;
-- collision rate, отклонение от маршрута, ускорение и jerk;
+- collision rate и отклонение от маршрута;
 - hard scenario mining через `WeightedRandomSampler`;
 - сравнение обычного обучения и hard mining;
 - train/validation loop;

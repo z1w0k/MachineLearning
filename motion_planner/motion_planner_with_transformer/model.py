@@ -19,6 +19,10 @@ class TrajectoryTransformer(nn.Module):
             torch.randn(1, history_steps, embedding_dim) * 0.02
         )
 
+        self.CLS_token = nn.Parameter(
+            torch.randn(1, 1, embedding_dim) * 0.02
+        )
+
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=embedding_dim,
             nhead=num_heads,
@@ -74,8 +78,20 @@ class TrajectoryTransformer(nn.Module):
             self.input_projection(flat_histories)
             + self.positional_embedding
         )
+
+        CLS_tokens = self.CLS_token.expand(
+            batch_size * num_agents,
+            -1,
+            -1,
+        )
+
+        tokens = torch.cat(
+            (CLS_tokens, tokens),
+            dim=1,
+        )
+
         encoded = self.encoder(tokens)
-        agent_embeddings = encoded[:, -1, :].reshape(
+        agent_embeddings = encoded[:, 0, :].reshape(
             batch_size,
             num_agents,
             -1,
