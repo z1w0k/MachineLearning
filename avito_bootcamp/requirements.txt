@@ -1,0 +1,6 @@
+numpy
+pandas
+pyarrow
+torch
+sentence-transformers
+hnswlib==0.8.0
